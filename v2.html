@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Capacitor, Diode &amp; Transistor Checkers</title>
+<style>
+  :root {
+    --board-size: min(90vw, 90vh, 720px);
+    --dark: #3d2b1f;
+    --light: #e8d5b7;
+    --red: #c0392b;
+    --black: #1a1a1a;
+    --highlight: #27ae60;
+    --valid: #2ecc71;
+    --selected: #f1c40f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #1e1e1e;
+    color: #eee;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 1rem;
+  }
+  h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: 0.05em; }
+  .info {
+    display: flex;
+    gap: 2rem;
+    align-items: center;
+    font-size: 0.95rem;
+  }
+  .turn { padding: 0.35rem 0.9rem; border-radius: 999px; background: #333; }
+  .turn.red { background: var(--red); }
+  .turn.black { background: #444; color: #ddd; }
+  #board {
+    width: var(--board-size);
+    height: var(--board-size);
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    border: 4px solid #555;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    user-select: none;
+  }
+  .cell {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .cell.dark { background: var(--dark); }
+  .cell.light { background: var(--light); }
+  .cell.valid { outline: 3px solid var(--valid); outline-offset: -3px; cursor: pointer; }
+  .cell.valid::after {
+    content: '';
+    position: absolute;
+    width: 28%;
+    height: 28%;
+    border-radius: 50%;
+    background: var(--valid);
+    opacity: 0.7;
+  }
+  .piece {
+    width: 78%;
+    height: 78%;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    position: relative;
+    z-index: 2;
+  }
+  .piece.red {
+    background: radial-gradient(circle at 35% 30%, #e74c3c, #922b21);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.45), inset 0 2px 4px rgba(255,255,255,0.25);
+  }
+  .piece.black {
+    background: radial-gradient(circle at 35% 30%, #555, #111);
+    box-shadow: 0 3px 8px rgba(0,0,0,0.55), inset 0 2px 4px rgba(255,255,255,0.12);
+  }
+  .piece.selected {
+    box-shadow: 0 0 0 4px var(--selected), 0 4px 12px rgba(0,0,0,0.5);
+    transform: scale(1.08);
+  }
+  .piece svg {
+    width: 70%;
+    height: 70%;
+    pointer-events: none;
+  }
+  .piece.king::before {
+    content: '♔';
+    position: absolute;
+    top: -6px;
+    right: -2px;
+    font-size: 0.9rem;
+    color: gold;
+    text-shadow: 0 1px 2px #000;
+  }
+  .controls {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  button {
+    background: #444;
+    color: #fff;
+    border: none;
+    padding: 0.5rem 1.1rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  button:hover { background: #666; }
+  .legend {
+    font-size: 0.8rem;
+    color: #aaa;
+    max-width: 640px;
+    text-align: center;
+    line-height: 1.45;
+  }
+  .msg {
+    min-height: 1.4em;
+    font-weight: 500;
+    color: #f1c40f;
+  }
+</style>
+</head>
+<body>
+  <h1>Capacitor, Diode &amp; Transistor Checkers</h1>
+  <div class="info">
+    <div class="turn" id="turnLabel">Red’s turn</div>
+    <div id="status" class="msg"></div>
+  </div>
+  <div id="board"></div>
+  <div class="controls">
+    <button id="newGame">New Game</button>
+  </div>
+  <p class="legend">
+    Pieces are randomly <strong>capacitors</strong>, <strong>diodes</strong> or <strong>transistors</strong> and start with a random orientation (0° / 90° / 180° / 270°).<br>
+    <strong>Diodes</strong> may only move diagonally in the direction the triangle is pointing.<br>
+    <strong>Capacitors</strong> may move forward or backward (both directions along their axis) and can jump over same-colour pieces; if the jumped piece is a diode it rotates 90° clockwise.<br>
+    <strong>Transistors</strong> may move in any of the four diagonal directions and can jump over any piece (friend or foe). Jumping a capacitor turns it into a diode (and vice-versa).<br>
+    Capture opponents by jumping over them. Reach the opposite end to become a king (then any of the four diagonal directions are allowed).
+  </p>
+<script>
+// ---------- Simple inline SVGs ----------
+const CAPACITOR_SVG = `
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <line x1="8" y1="32" x2="24" y2="32" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+  <line x1="24" y1="16" x2="24" y2="48" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+  <line x1="40" y1="16" x2="40" y2="48" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+  <line x1="40" y1="32" x2="56" y2="32" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+</svg>`;
+const DIODE_SVG = `
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <line x1="8" y1="32" x2="22" y2="32" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+  <polygon points="22,16 22,48 44,32" fill="currentColor"/>
+  <line x1="44" y1="16" x2="44" y2="48" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+  <line x1="44" y1="32" x2="56" y2="32" stroke="currentColor" stroke-width="4" stroke-linecap="round"/>
+</svg>`;
+const TRANSISTOR_SVG = `
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- simple NPN-style transistor symbol -->
+  <circle cx="32" cy="32" r="18" fill="none" stroke="currentColor" stroke-width="3"/>
+  <line x1="32" y1="14" x2="32" y2="50" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <line x1="18" y1="24" x2="32" y2="32" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <line x1="18" y1="40" x2="32" y2="32" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+  <line x1="46" y1="32" x2="54" y2="32" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+</svg>`;
+// Diode SVG triangle points RIGHT by default (0°).
+// CSS rotation is applied clockwise, so:
+//   0°   → points right  → NE, SE
+//   90°  → points down   → SE, SW
+//   180° → points left   → SW, NW
+//   270° → points up     → NW, NE
+const DIODE_DIRS = {
+  0:   [ [ 1,-1], [ 1, 1] ], // right
+  90:  [ [ 1, 1], [-1, 1] ], // down
+  180: [ [-1, 1], [-1,-1] ], // left
+  270: [ [-1,-1], [ 1,-1] ], // up
+};
+// Capacitors can move forward OR backward along their axis
+// (i.e. the two directions of the diode + the two opposite ones)
+const CAP_DIRS = {
+  0:   [ [ 1,-1], [ 1, 1], [-1,-1], [-1, 1] ], // left-right axis → all four
+  90:  [ [ 1,-1], [ 1, 1], [-1,-1], [-1, 1] ], // same (vertical axis still covers all diagonals)
+  180: [ [ 1,-1], [ 1, 1], [-1,-1], [-1, 1] ],
+  270: [ [ 1,-1], [ 1, 1], [-1,-1], [-1, 1] ],
+};
+// Transistors can always move in any of the four diagonal directions
+const TRANSISTOR_DIRS = [ [-1,-1], [1,-1], [-1,1], [1,1] ];
+const SIZE = 8;
+let board = [];          // board[r][c] = piece | null
+let selected = null;     // {r,c}
+let validMoves = [];     // [{r,c, capture}]
+let current = 'red';     // 'red' | 'black'
+let gameOver = false;
+function rndOrient() {
+  return [0, 90, 180, 270][Math.floor(Math.random() * 4)];
+}
+function rndType() {
+  const r = Math.random();
+  if (r < 0.34) return 'capacitor';
+  if (r < 0.67) return 'diode';
+  return 'transistor';
+}
+function createPiece(color) {
+  return {
+    color,
+    type: rndType(),
+    orient: rndOrient(),
+    king: false
+  };
+}
+function initBoard() {
+  board = Array.from({ length: SIZE }, () => Array(SIZE).fill(null));
+  // Black pieces on top (rows 0-2)
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      if ((r + c) % 2 === 1) board[r][c] = createPiece('black');
+    }
+  }
+  // Red pieces on bottom (rows 5-7)
+  for (let r = 5; r < 8; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      if ((r + c) % 2 === 1) board[r][c] = createPiece('red');
+    }
+  }
+  current = 'red';
+  selected = null;
+  validMoves = [];
+  gameOver = false;
+  document.getElementById('status').textContent = '';
+  updateTurnLabel();
+  render();
+}
+function updateTurnLabel() {
+  const el = document.getElementById('turnLabel');
+  el.textContent = current === 'red' ? "Red’s turn" : "Black’s turn";
+  el.className = 'turn ' + current;
+}
+function inBounds(r, c) {
+  return r >= 0 && r < SIZE && c >= 0 && c < SIZE;
+}
+function getAllowedDeltas(piece) {
+  if (piece.king) {
+    // kings may move any of the four diagonal directions
+    return [ [-1,-1], [1,-1], [-1,1], [1,1] ];
+  }
+  if (piece.type === 'diode') {
+    // only the direction the triangle is pointing
+    return DIODE_DIRS[piece.orient] || DIODE_DIRS[0];
+  }
+  if (piece.type === 'transistor') {
+    return TRANSISTOR_DIRS;
+  }
+  // capacitor: forward or backward (both directions of the axis)
+  return CAP_DIRS[piece.orient] || CAP_DIRS[0];
+}
+function getMoves(r, c) {
+  const piece = board[r][c];
+  if (!piece) return [];
+  const deltas = getAllowedDeltas(piece);
+  const moves = [];
+  for (const [dc, dr] of deltas) {
+    const nr = r + dr;
+    const nc = c + dc;
+    if (!inBounds(nr, nc)) continue;
+    if (!board[nr][nc]) {
+      // empty – simple move
+      moves.push({ r: nr, c: nc, capture: null, friendly: false });
+    } else if (board[nr][nc].color !== piece.color) {
+      // opponent – capture jump
+      const jr = nr + dr;
+      const jc = nc + dc;
+      if (inBounds(jr, jc) && !board[jr][jc]) {
+        moves.push({ r: jr, c: jc, capture: { r: nr, c: nc }, friendly: false });
+      }
+    } else {
+      // same colour
+      // capacitors can jump same-colour (to rotate diodes)
+      // transistors can jump any piece (to switch capacitor ↔ diode)
+      if (piece.type === 'capacitor' || piece.type === 'transistor') {
+        const jr = nr + dr;
+        const jc = nc + dc;
+        if (inBounds(jr, jc) && !board[jr][jc]) {
+          moves.push({ r: jr, c: jc, capture: { r: nr, c: nc }, friendly: true });
+        }
+      }
+    }
+  }
+  return moves;
+}
+function switchType(piece) {
+  if (!piece) return;
+  if (piece.type === 'capacitor') piece.type = 'diode';
+  else if (piece.type === 'diode') piece.type = 'capacitor';
+  // transistors stay transistors
+}
+function tryMove(tr, tc) {
+  if (!selected) return;
+  const move = validMoves.find(m => m.r === tr && m.c === tc);
+  if (!move) return;
+  const { r, c } = selected;
+  const piece = board[r][c];
+  // move piece
+  board[tr][tc] = piece;
+  board[r][c] = null;
+  // handle jump
+  if (move.capture) {
+    const jumped = board[move.capture.r][move.capture.c];
+    if (move.friendly) {
+      // friendly jump
+      if (piece.type === 'capacitor') {
+        // capacitor jumped a same-colour piece:
+        // if it is a diode, rotate it 90° clockwise (do not remove it)
+        if (jumped && jumped.type === 'diode') {
+          jumped.orient = (jumped.orient + 90) % 360;
+        }
+      } else if (piece.type === 'transistor') {
+        // transistor switches capacitor ↔ diode
+        switchType(jumped);
+      }
+      // piece stays on the board
+    } else {
+      // normal capture – remove opponent
+      // but if the jumper is a transistor we still switch the type first
+      // (though the piece is then removed, the switch is mostly cosmetic)
+      if (piece.type === 'transistor') {
+        switchType(jumped);
+      }
+      board[move.capture.r][move.capture.c] = null;
+    }
+  }
+  // king promotion
+  if (!piece.king) {
+    if (piece.color === 'red' && tr === 0) piece.king = true;
+    if (piece.color === 'black' && tr === 7) piece.king = true;
+  }
+  // after a jump, check for further jumps from the new position
+  if (move.capture) {
+    const further = getMoves(tr, tc).filter(m => m.capture);
+    if (further.length) {
+      selected = { r: tr, c: tc };
+      validMoves = further;
+      render();
+      return; // same player continues
+    }
+  }
+  // switch turn
+  selected = null;
+  validMoves = [];
+  current = current === 'red' ? 'black' : 'red';
+  updateTurnLabel();
+  // check win
+  const hasRed = board.flat().some(p => p && p.color === 'red');
+  const hasBlack = board.flat().some(p => p && p.color === 'black');
+  if (!hasRed || !hasBlack) {
+    gameOver = true;
+    document.getElementById('status').textContent =
+      !hasRed ? 'Black wins!' : 'Red wins!';
+  }
+  render();
+}
+function cellClick(r, c) {
+  if (gameOver) return;
+  if (selected && validMoves.some(m => m.r === r && m.c === c)) {
+    tryMove(r, c);
+  } else if (board[r][c] && board[r][c].color === current) {
+    selectPiece(r, c);
+  } else {
+    selected = null;
+    validMoves = [];
+    render();
+  }
+}
+function selectPiece(r, c) {
+  const piece = board[r][c];
+  if (!piece || piece.color !== current || gameOver) return;
+  selected = { r, c };
+  validMoves = getMoves(r, c);
+  render();
+}
+function render() {
+  const boardEl = document.getElementById('board');
+  boardEl.innerHTML = '';
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell ' + ((r + c) % 2 === 0 ? 'light' : 'dark');
+      if (validMoves.some(m => m.r === r && m.c === c)) cell.classList.add('valid');
+      cell.addEventListener('click', () => cellClick(r, c));
+      const piece = board[r][c];
+      if (piece) {
+        const div = document.createElement('div');
+        div.className = 'piece ' + piece.color;
+        if (selected && selected.r === r && selected.c === c) div.classList.add('selected');
+        if (piece.king) div.classList.add('king');
+        // colour of the schematic
+        const color = piece.color === 'red' ? '#fff' : '#ddd';
+        let svg;
+        if (piece.type === 'capacitor') svg = CAPACITOR_SVG;
+        else if (piece.type === 'diode') svg = DIODE_SVG;
+        else svg = TRANSISTOR_SVG;
+        svg = svg.replace(/currentColor/g, color);
+        div.innerHTML = svg;
+        // apply orientation (transistors also rotate for visual variety)
+        const svgEl = div.querySelector('svg');
+        if (svgEl) {
+          svgEl.style.transform = `rotate(${piece.orient}deg)`;
+          svgEl.style.transformOrigin = 'center';
+        }
+        cell.appendChild(div);
+      }
+      boardEl.appendChild(cell);
+    }
+  }
+}
+document.getElementById('newGame').addEventListener('click', initBoard);
+initBoard();
+</script>
+</body>
+</html>
